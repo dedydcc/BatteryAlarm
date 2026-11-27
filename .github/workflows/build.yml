@@ -19,13 +19,114 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Accept Android SDK Licenses & Install SDK 34
+        run: |
+          SDKMANAGER=$(find "$ANDROID_HOME" -name sdkmanager | head -n 1)
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
+
+      - name: Auto-Create Gradle Config & Verify App Files
+        run: |
+          mkdir -p app
+
+          cat << 'EOF' > settings.gradle.kts
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "BatteryAlarm"
+          include(":app")
+          EOF
+
+          cat << 'EOF' > build.gradle.kts
+          plugins {
+              id("com.android.application") version "8.5.0" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+
+          cat << 'EOF' > gradle.properties
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          android.nonTransitiveRClass=true
+          EOF
+
+          cat << 'EOF' > app/build.gradle.kts
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.example.batteryalarm"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.example.batteryalarm"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.appcompat:appcompat:1.7.0")
+              implementation("com.google.android.material:material:1.12.0")
+              implementation("androidx.activity:activity-ktx:1.9.0")
+          }
+          EOF
+
+          MISSING=0
+          for FILE in \
+            "app/src/main/AndroidManifest.xml" \
+            "app/src/main/java/com/example/batteryalarm/MainActivity.kt" \
+            "app/src/main/java/com/example/batteryalarm/BatteryMonitorService.kt" \
+            "app/src/main/java/com/example/batteryalarm/AlarmActivity.kt"
+          do
+            if [ ! -f "$FILE" ]; then
+              echo "::error::FILE TIDAK DITEMUKAN -> $FILE"
+              MISSING=1
+            fi
+          done
+
+          if [ "$MISSING" -eq 1 ]; then
+            echo "Daftar file yang ada saat ini di folder app:"
+            find app -type f
+            exit 1
+          fi
 
       - name: Build Debug APK
         run: gradle assembleDebug
